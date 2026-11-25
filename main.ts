@@ -5,6 +5,9 @@
 // down, so this bot only owns an asset while its short trend is above its
 // long trend AND its last 24 hours are up more than 1%, and it leaves the
 // moment either breaks or the price slips 3.5% off its peak since entry.
+// A third exit banks the trade at +3.5% from entry: in a falling market
+// that keeps bounce profits instead of riding them back down, and in a
+// rising market the entry filters simply buy back in on the next bar.
 // come in two tranches (12.5% of equity, then a top-up to the 25% cap
 // once the trade has proven itself for 6 bars), which keeps a quiet
 // up-trend window above the 8-trade guardrail without churning. Every
@@ -26,6 +29,7 @@ const TRANCHE_BPS = 1250; // first tranche: 12.5% of equity
 const MAX_POSITION_BPS = 2500; // top-up target: 25% of equity (the cap)
 const PROVE_BARS = 6; // bars a first tranche must age before the top-up
 const TRAIL_BPS = 350; // sell when the close is 3.5% below the peak since entry
+const TAKE_BPS = 350; // bank the trade when the close is 3.5% above its entry
 const MOMENTUM_MIN_BPS = 100; // entry needs a 24 h return above +1%, not just above 0
 const TOPUP_MIN_BPS = 200; // top-up needs the trade up 2% from its entry close
 const MAX_SLIPPAGE_BPS = 500; // 5%: wide enough that hourly gaps never reject
@@ -122,10 +126,15 @@ await runBars({
       const mom = momentumUp(t);
 
       if (held !== undefined) {
-        // Keep the peak fresh, then check the two exits: trend broken, or
-        // the trailing stop tripped. Either one sells the whole position.
+        // Keep the peak fresh, then check the three exits: trend broken,
+        // the trailing stop tripped, or the profit target reached. Any one
+        // sells the whole position. Banking a bounce beats riding it back
+        // down in a falling market, and in a rising one the entry filters
+        // simply buy back in on the next bar.
         if (t.peakClose === null || close > t.peakClose) t.peakClose = close;
-        if (!up || trailedOff(t, close)) {
+        const tookProfit =
+          t.entryClose !== null && close * 10000n >= t.entryClose * BigInt(10000 + TAKE_BPS);
+        if (!up || trailedOff(t, close) || tookProfit) {
           orders.push({ side: 'sell', symbol, qty: held.qty, max_slippage_bps: MAX_SLIPPAGE_BPS });
           t.entryClose = null;
           t.peakClose = null;
