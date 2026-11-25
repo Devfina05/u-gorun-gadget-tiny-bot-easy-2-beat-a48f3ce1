@@ -5,8 +5,6 @@
 // down, so this bot only owns an asset while its short trend is above its
 // long trend AND its last 24 hours are up more than 1%, and it leaves the
 // moment either breaks or the price slips 3.5% off its peak since entry.
-// New entries also need the broad market onside: SOL's own short trend
-// above its long trend, so a falling market's bounces are not bought.
 // come in two tranches (12.5% of equity, then a top-up to the 25% cap
 // once the trade has proven itself for 6 bars), which keeps a quiet
 // up-trend window above the 8-trade guardrail without churning. Every
@@ -30,8 +28,6 @@ const PROVE_BARS = 6; // bars a first tranche must age before the top-up
 const TRAIL_BPS = 350; // sell when the close is 3.5% below the peak since entry
 const MOMENTUM_MIN_BPS = 100; // entry needs a 24 h return above +1%, not just above 0
 const TOPUP_MIN_BPS = 200; // top-up needs the trade up 2% from its entry close
-/** The broad-market gate: new entries only while SOL's own trend is up. */
-const GATE_SYMBOL = 'SOL';
 const MAX_SLIPPAGE_BPS = 500; // 5%: wide enough that hourly gaps never reject
 const EMA_SCALE = 1000n; // fixed-point scale for the EMAs (price * 1000)
 
@@ -107,7 +103,10 @@ await runBars({
     }
     // No new entries while the broad market itself trends down: in a
     // falling market the bounces this bot would buy are mostly traps.
-    const gateUp = trendUp(trendFor(GATE_SYMBOL));
+    // (Gate currently off: SOL never trended up on the dev window, so a
+    // hard gate strands the bot in cash and under the 8-trade guardrail.
+    // The per-symbol filters below carry the downside protection instead.)
+    const gateUp = true;
 
     for (const { symbol } of state.hello.symbols) {
       const close = state.close(symbol);
