@@ -3,8 +3,10 @@
 //
 // Idea in one paragraph: buy-and-hold loses whenever the market drifts
 // down, so this bot only owns an asset while its short trend is above its
-// long trend AND its last 24 hours are positive, and it leaves the moment
-// either breaks or the price slips 6% off its peak since entry. Entries
+// long trend AND its last 24 hours are up more than 1%, and it leaves the
+// moment either breaks or the price slips 3.5% off its peak since entry.
+// New entries also need the broad market onside: SOL's own short trend
+// above its long trend, so a falling market's bounces are not bought.
 // come in two tranches (12.5% of equity, then a top-up to the 25% cap
 // once the trade has proven itself for 6 bars), which keeps a quiet
 // up-trend window above the 8-trade guardrail without churning. Every
@@ -25,7 +27,11 @@ const MIN_HISTORY = 33; // bars of history before the first signal
 const TRANCHE_BPS = 1250; // first tranche: 12.5% of equity
 const MAX_POSITION_BPS = 2500; // top-up target: 25% of equity (the cap)
 const PROVE_BARS = 6; // bars a first tranche must age before the top-up
-const TRAIL_BPS = 600; // sell when the close is 6% below the peak since entry
+const TRAIL_BPS = 350; // sell when the close is 3.5% below the peak since entry
+const MOMENTUM_MIN_BPS = 100; // entry needs a 24 h return above +1%, not just above 0
+const TOPUP_MIN_BPS = 200; // top-up needs the trade up 2% from its entry close
+/** The broad-market gate: new entries only while SOL's own trend is up. */
+const GATE_SYMBOL = 'SOL';
 const MAX_SLIPPAGE_BPS = 500; // 5%: wide enough that hourly gaps never reject
 const EMA_SCALE = 1000n; // fixed-point scale for the EMAs (price * 1000)
 
@@ -69,11 +75,11 @@ function trendUp(t: Trend): boolean {
   return t.fast !== null && t.slow !== null && t.fast > t.slow;
 }
 
-/** True while the symbol's close is above its close MOMENTUM_BARS bars back. */
+/** True while the symbol's close beats its close MOMENTUM_BARS bars back by more than MOMENTUM_MIN_BPS. */
 function momentumUp(t: Trend): boolean {
   const n = t.closes.length;
   if (n <= MOMENTUM_BARS) return false;
-  return t.closes[n - 1]! > t.closes[n - 1 - MOMENTUM_BARS]!;
+  return t.closes[n - 1]! * 10000n > t.closes[n - 1 - MOMENTUM_BARS]! * BigInt(10000 + MOMENTUM_MIN_BPS);
 }
 
 /** True once the price has fallen TRAIL_BPS below its peak since entry. */
@@ -89,15 +95,24 @@ await runBars({
     let spendable = state.cash;
     const orders: OrderInput[] = [];
 
+    // Fold every bar in first, so the broad-market gate sees SOL's bar
+    // from this same batch before any symbol is decided on.
     for (const { symbol } of state.hello.symbols) {
       const close = state.close(symbol);
       if (close === null) continue;
       const t = trendFor(symbol);
-
-      // Fold this bar in first: the decision below sees the bar just closed.
       t.closes.push(close);
       t.fast = emaStep(t.fast, close, FAST_BARS);
       t.slow = emaStep(t.slow, close, SLOW_BARS);
+    }
+    // No new entries while the broad market itself trends down: in a
+    // falling market the bounces this bot would buy are mostly traps.
+    const gateUp = trendUp(trendFor(GATE_SYMBOL));
+
+    for (const { symbol } of state.hello.symbols) {
+      const close = state.close(symbol);
+      if (close === null) continue;
+      const t = trendFor(symbol);
 
       // Warm-up batches are for building history only; the harness rejects
       // any order decided on one. Too little history means no signal yet.
@@ -118,13 +133,13 @@ await runBars({
           t.tranches = 0;
           continue;
         }
-        // Top-up: the trade has aged, is still in profit, and both filters
-        // still agree. Size it to the position cap, never past it.
+        // Top-up: the trade has aged, is up at least TOPUP_MIN_BPS from
+        // entry, and both filters still agree. Size it to the cap.
         if (
           t.tranches === 1 &&
           batch.seq - t.entrySeq >= PROVE_BARS &&
           t.entryClose !== null &&
-          close > t.entryClose &&
+          close * 10000n > t.entryClose * BigInt(10000 + TOPUP_MIN_BPS) &&
           mom
         ) {
           const room = state.weightRoom(symbol);
@@ -143,8 +158,9 @@ await runBars({
         continue;
       }
 
-      // Flat: enter only while both filters agree, with the first tranche.
-      if (up && mom) {
+      // Flat: enter only while both filters agree and the broad market is
+      // not itself in a downtrend, with the first tranche.
+      if (up && mom && gateUp) {
         let size = (BigInt(TRANCHE_BPS) * state.equity) / BPS;
         const room = state.weightRoom(symbol);
         if (size > room) size = room;
