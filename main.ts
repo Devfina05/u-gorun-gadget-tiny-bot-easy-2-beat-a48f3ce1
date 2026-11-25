@@ -126,15 +126,18 @@ await runBars({
       const mom = momentumUp(t);
 
       if (held !== undefined) {
-        // Keep the peak fresh, then check the three exits: trend broken,
-        // the trailing stop tripped, or the profit target reached. Any one
-        // sells the whole position. Banking a bounce beats riding it back
+        // Keep the peak fresh, then check the exits: trend broken, price
+        // under its slow EMA, the trailing stop tripped, or the profit
+        // target reached. Any one sells the whole position. Price under
+        // the slow EMA catches a slow grind down long before the fast
+        // EMA crosses under it; banking a bounce beats riding it back
         // down in a falling market, and in a rising one the entry filters
         // simply buy back in on the next bar.
         if (t.peakClose === null || close > t.peakClose) t.peakClose = close;
         const tookProfit =
           t.entryClose !== null && close * 10000n >= t.entryClose * BigInt(10000 + TAKE_BPS);
-        if (!up || trailedOff(t, close) || tookProfit) {
+        const underSlow = t.slow !== null && close * EMA_SCALE < t.slow;
+        if (!up || underSlow || trailedOff(t, close) || tookProfit) {
           orders.push({ side: 'sell', symbol, qty: held.qty, max_slippage_bps: MAX_SLIPPAGE_BPS });
           t.entryClose = null;
           t.peakClose = null;
