@@ -29,7 +29,7 @@ The grader runs `node /bot/main.ts` with this directory mounted at `/bot`. Node 
 
 | Bot | Net PnL (USDC) | Return | Trades | Max drawdown |
 | --- | --- | --- | --- | --- |
-| Twin-Tranche Trend (this bot) | see grade output | — | — | — |
+| Twin-Tranche Trend (this bot) | −142.20 | −1.42% | 20 | 1.65% |
 | ema-cross (best house baseline) | −173.04 | −1.73% | 28 | 2.51% |
 | momentum (house baseline) | −268.23 | −2.68% | 19 | 5.66% |
 | buy-and-hold (house baseline) | −869.34 | −8.69% | 7 | 10.92% |
